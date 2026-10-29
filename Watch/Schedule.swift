@@ -1,104 +1,154 @@
 import SwiftUI
 
-// MARK: - Edit your schedule here
-// Times are 24-hour (1:07 PM = 13:07). Only class periods get 20/10/5-minute alerts.
+// MARK: - One block of the school day (a class, recess, or lunch)
 
-enum Schedule {
-    static let blocks: [Block] = [
-        Block(name: "Math",           room: "Room 102",  start: .init(8, 15),  end: .init(9, 15),  kind: .classPeriod),
-        Block(name: "Band",           room: "Room FA12", start: .init(9, 15),  end: .init(10, 14), kind: .classPeriod),
-        Block(name: "Social Studies", room: "Room 110",  start: .init(10, 14), end: .init(11, 13), kind: .classPeriod),
-        Block(name: "Science",        room: "Room 101",  start: .init(11, 13), end: .init(12, 15), kind: .classPeriod),
-        Block(name: "Recess",         room: nil,         start: .init(12, 15), end: .init(12, 45), kind: .recess),
-        Block(name: "Lunch",          room: nil,         start: .init(12, 45), end: .init(13, 7),  kind: .lunch),
-        Block(name: "STM",            room: "Room 103",  start: .init(13, 7),  end: .init(14, 6),  kind: .classPeriod),
-        Block(name: "ELA",            room: "Room 107",  start: .init(14, 6),  end: .init(15, 15), kind: .classPeriod),
-    ]
+struct Period: Codable, Identifiable, Equatable {
+    enum Kind: String, Codable, CaseIterable {
+        case classPeriod, recess, lunch
 
-    // Monday through Friday. (Calendar weekdays: Sunday = 1 ... Saturday = 7)
-    static func isSchoolDay(_ date: Date) -> Bool {
-        let weekday = Calendar.current.component(.weekday, from: date)
-        return (2...6).contains(weekday)
+        var label: String {
+            switch self {
+            case .classPeriod: return "Class"
+            case .recess: return "Recess"
+            case .lunch: return "Lunch"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .classPeriod: return .blue
+            case .recess: return .green
+            case .lunch: return .orange
+            }
+        }
     }
 
-    // "2026-10-29" style key used for the "No school today" switch.
+    var id = UUID()
+    var name: String
+    var room: String
+    var startMinutes: Int   // minutes after midnight, 8:15 AM = 495
+    var endMinutes: Int
+    var kind: Kind
+
+    /// Only classes get the 20 / 10 / 5-minute alerts.
+    var getsAlerts: Bool { kind == .classPeriod }
+
+    func startDate(on day: Date) -> Date { Schedule.date(minutes: startMinutes, on: day) }
+    func endDate(on day: Date) -> Date { Schedule.date(minutes: endMinutes, on: day) }
+}
+
+// MARK: - Saved schedule (editable in Settings)
+
+final class ScheduleStore: ObservableObject {
+    static let shared = ScheduleStore()
+    private static let key = "periods.v1"
+
+    @Published private(set) var periods: [Period]
+
+    private init() {
+        periods = ScheduleStore.load()
+    }
+
+    /// Thread-safe read straight from storage (used by the alert scheduler).
+    static func load() -> [Period] {
+        if let data = UserDefaults.standard.data(forKey: key),
+           let saved = try? JSONDecoder().decode([Period].self, from: data),
+           !saved.isEmpty {
+            return saved.sorted { $0.startMinutes < $1.startMinutes }
+        }
+        return Schedule.defaultPeriods
+    }
+
+    func save(_ period: Period) {
+        if let i = periods.firstIndex(where: { $0.id == period.id }) {
+            periods[i] = period
+        } else {
+            periods.append(period)
+        }
+        commit()
+    }
+
+    func delete(_ period: Period) {
+        periods.removeAll { $0.id == period.id }
+        commit()
+    }
+
+    func resetToDefault() {
+        periods = Schedule.defaultPeriods
+        commit()
+    }
+
+    private func commit() {
+        periods.sort { $0.startMinutes < $1.startMinutes }
+        if let data = try? JSONEncoder().encode(periods) {
+            UserDefaults.standard.set(data, forKey: ScheduleStore.key)
+        }
+        AlertScheduler.shared.reschedule(completion: nil)
+    }
+}
+
+// MARK: - Schedule math
+
+enum Schedule {
+    /// The schedule from the school portal. "Reset" in Settings brings this back.
+    static let defaultPeriods: [Period] = [
+        Period(name: "Math",           room: "Room 102",  startMinutes: m(8, 15),  endMinutes: m(9, 15),  kind: .classPeriod),
+        Period(name: "Band",           room: "Room FA12", startMinutes: m(9, 15),  endMinutes: m(10, 14), kind: .classPeriod),
+        Period(name: "Social Studies", room: "Room 110",  startMinutes: m(10, 14), endMinutes: m(11, 13), kind: .classPeriod),
+        Period(name: "Science",        room: "Room 101",  startMinutes: m(11, 13), endMinutes: m(12, 15), kind: .classPeriod),
+        Period(name: "Recess",         room: "",          startMinutes: m(12, 15), endMinutes: m(12, 45), kind: .recess),
+        Period(name: "Lunch",          room: "",          startMinutes: m(12, 45), endMinutes: m(13, 7),  kind: .lunch),
+        Period(name: "STM",            room: "Room 103",  startMinutes: m(13, 7),  endMinutes: m(14, 6),  kind: .classPeriod),
+        Period(name: "ELA",            room: "Room 107",  startMinutes: m(14, 6),  endMinutes: m(15, 15), kind: .classPeriod),
+    ]
+
+    static func m(_ hour: Int, _ minute: Int) -> Int { hour * 60 + minute }
+
+    static func date(minutes: Int, on day: Date) -> Date {
+        Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day) ?? day
+    }
+
+    /// "8:15 AM"
+    static func label(_ minutes: Int) -> String {
+        let h = minutes / 60
+        let h12 = h % 12 == 0 ? 12 : h % 12
+        return String(format: "%d:%02d %@", h12, minutes % 60, h < 12 ? "AM" : "PM")
+    }
+
+    /// Monday through Friday. (Calendar weekdays: Sunday = 1 ... Saturday = 7)
+    static func isSchoolDay(_ date: Date) -> Bool {
+        (2...6).contains(Calendar.current.component(.weekday, from: date))
+    }
+
+    /// "2026-10-29" style key used for the "No school today" switch.
     static func dayKey(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    static func block(after block: Block) -> Block? {
-        guard let i = blocks.firstIndex(where: { $0.name == block.name }), i + 1 < blocks.count else { return nil }
-        return blocks[i + 1]
-    }
-
-    static func status(at now: Date, dayOff: Bool) -> DayStatus {
+    static func status(at now: Date, periods: [Period], dayOff: Bool) -> DayStatus {
         if !isSchoolDay(now) { return .noSchool("No school today") }
-        if dayOff { return .noSchool("Day off — alerts paused") }
+        if dayOff { return .noSchool("Day off · alerts paused") }
+        guard let first = periods.first, let last = periods.last else { return .noSchool("No periods set") }
 
-        guard let first = blocks.first, let last = blocks.last else { return .afterSchool }
+        if now < first.startDate(on: now) { return .beforeSchool(first: first) }
+        if now >= last.endDate(on: now) { return .afterSchool }
 
-        if now < first.start.date(on: now) { return .beforeSchool(first: first) }
-        if now >= last.end.date(on: now) { return .afterSchool }
-
-        for block in blocks {
-            let s = block.start.date(on: now)
-            let e = block.end.date(on: now)
-            if now >= s && now < e {
-                return .inBlock(block, next: Schedule.block(after: block))
-            }
+        for (i, p) in periods.enumerated() where now >= p.startDate(on: now) && now < p.endDate(on: now) {
+            let next = i + 1 < periods.count ? periods[i + 1] : nil
+            return .inPeriod(p, next: next)
         }
-        // Gap between blocks (none in the current schedule, but handled anyway).
-        if let next = blocks.first(where: { $0.start.date(on: now) > now }) {
+        if let next = periods.first(where: { $0.startDate(on: now) > now }) {
             return .between(next: next)
         }
         return .afterSchool
     }
 }
 
-struct ClockTime {
-    let hour: Int
-    let minute: Int
-
-    init(_ hour: Int, _ minute: Int) {
-        self.hour = hour
-        self.minute = minute
-    }
-
-    func date(on day: Date) -> Date {
-        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
-    }
-
-    var label: String {
-        let h12 = hour % 12 == 0 ? 12 : hour % 12
-        return String(format: "%d:%02d", h12, minute)
-    }
-}
-
-struct Block {
-    enum Kind { case classPeriod, recess, lunch }
-
-    let name: String
-    let room: String?
-    let start: ClockTime
-    let end: ClockTime
-    let kind: Kind
-
-    var getsAlerts: Bool { kind == .classPeriod }
-
-    var color: Color {
-        switch kind {
-        case .classPeriod: return .blue
-        case .recess: return .green
-        case .lunch: return .orange
-        }
-    }
-}
-
 enum DayStatus {
     case noSchool(String)
-    case beforeSchool(first: Block)
-    case inBlock(Block, next: Block?)
-    case between(next: Block)
+    case beforeSchool(first: Period)
+    case inPeriod(Period, next: Period?)
+    case between(next: Period)
     case afterSchool
 }

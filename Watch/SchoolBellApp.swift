@@ -8,7 +8,9 @@ struct SchoolBellApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            NavigationStack {
+                ContentView()
+            }
         }
     }
 }
@@ -17,12 +19,13 @@ final class AppDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching() {
         UNUserNotificationCenter.current().delegate = self
+        // Asks for permission the first time, then schedules alerts.
         AlertScheduler.shared.requestPermissionAndSchedule()
         AlertScheduler.shared.scheduleBackgroundRefresh()
     }
 
     func applicationDidBecomeActive() {
-        // Every time the app opens, refresh the upcoming alerts.
+        // Every time the app opens, top up the upcoming alerts.
         AlertScheduler.shared.reschedule(completion: nil)
     }
 
