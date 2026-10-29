@@ -1,0 +1,53 @@
+name: SchoolBell
+
+options:
+  bundleIdPrefix: com.keaton
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+
+targets:
+  SchoolBell:
+    type: application
+    platform: iOS
+    sources:
+      - Phone
+    settings:
+      base:
+        PRODUCT_NAME: SchoolBell
+        PRODUCT_BUNDLE_IDENTIFIER: com.keaton.schoolbell
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: Support/Phone-Info.plist
+      properties:
+        CFBundleDisplayName: School Bell
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+
+  SchoolBellWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - Watch
+    settings:
+      base:
+        PRODUCT_NAME: SchoolBellWatch
+        PRODUCT_BUNDLE_IDENTIFIER: com.keaton.schoolbell.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+    info:
+      path: Support/Watch-Info.plist
+      properties:
+        CFBundleDisplayName: School Bell
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.keaton.schoolbell
+        WKRunsIndependentlyOfCompanionApp: true
